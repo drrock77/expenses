@@ -2,7 +2,7 @@ name: Build MCP Servers
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
     paths:
       - 'concur-mcp-server/**'
       - 'tripit-mcp-server/**'

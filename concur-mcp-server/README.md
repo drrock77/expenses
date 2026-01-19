@@ -100,3 +100,4 @@ Tests use Vitest with mocked fetch calls:
 ```bash
 npm test
 ```
+# Trigger build
