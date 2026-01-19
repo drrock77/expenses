@@ -139,13 +139,35 @@ server.tool(
 // Tool: list_concur_expenses
 server.tool(
     "list_concur_expenses",
-    "List Concur expenses (optionally filtered by report ID)",
+    "List Concur expenses (optionally filtered by report ID) - uses v3 API",
     {
         reportId: z.string().optional().describe("Optional Report ID to filter expenses"),
     },
     async ({ reportId }) => {
         try {
             const expenses = await concurService.getExpenses(reportId);
+            return {
+                content: [{ type: "text", text: JSON.stringify(expenses, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// Tool: list_expenses_v4
+server.tool(
+    "list_expenses_v4",
+    "List expenses for a report using v4 API - returns expenseId needed for comments/attendees",
+    {
+        reportId: z.string().describe("Report ID to list expenses for"),
+    },
+    async ({ reportId }) => {
+        try {
+            const expenses = await concurService.getExpensesV4(reportId);
             return {
                 content: [{ type: "text", text: JSON.stringify(expenses, null, 2) }],
             };
@@ -489,15 +511,15 @@ server.tool(
 // Tool: add_expense_comment
 server.tool(
     "add_expense_comment",
-    "Add or update a comment on an expense entry using the v4 API. Use for justification on high-value expenses or policy exceptions.",
+    "Add a comment on an expense (v4 API). IMPORTANT: Use expenseId from list_expenses_v4, NOT the v3 entry ID.",
     {
-        entryId: z.string().describe("The expense entry ID"),
-        comment: z.string().describe("Comment text (max 500 chars)"),
-        reportId: z.string().optional().describe("The report ID (optional - will be looked up from expense if not provided)"),
+        expenseId: z.string().describe("The v4 expense ID (get from list_expenses_v4)"),
+        comment: z.string().describe("Comment text"),
+        reportId: z.string().describe("The report ID"),
     },
-    async ({ entryId, comment, reportId }) => {
+    async ({ expenseId, comment, reportId }) => {
         try {
-            const result = await concurService.addExpenseComment(entryId, comment, reportId);
+            const result = await concurService.addExpenseComment(expenseId, comment, reportId);
             return {
                 content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
             };
@@ -576,11 +598,11 @@ server.tool(
 // Tool: add_expense_attendee
 server.tool(
     "add_expense_attendee",
-    "Add an attendee to an expense entry (for meals, entertainment, etc.)",
+    "Add an attendee to an expense (v4 API). IMPORTANT: Use expenseId from list_expenses_v4, NOT the v3 entry ID.",
     {
-        entryId: z.string().describe("The ID of the expense entry"),
-        attendeeId: z.string().describe("The ID of the attendee to add"),
-        reportId: z.string().describe("The ID of the report containing the expense"),
+        expenseId: z.string().describe("The v4 expense ID (get from list_expenses_v4)"),
+        attendeeId: z.string().describe("The ID of the attendee (from create_attendee or search_attendees)"),
+        reportId: z.string().describe("The report ID"),
         amount: z.number().describe("Amount to allocate to this attendee"),
         currencyCode: z.string().describe("Currency code (e.g., USD)"),
         associatedAttendeeCount: z.number().optional().describe("Number of additional unnamed attendees"),

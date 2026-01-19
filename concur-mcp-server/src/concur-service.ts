@@ -251,6 +251,21 @@ export class ConcurService {
         return { Items: data.Items || [] };
     }
 
+    async getExpensesV4(reportId: string) {
+        await this.ensureToken();
+        const userId = this.getUserIdFromToken();
+        const encodedUserId = encodeURIComponent(userId);
+        const encodedReportId = encodeURIComponent(reportId);
+
+        const response = await this.fetchWithRetry(
+            `${this.baseUrl}/expensereports/v4/users/${encodedUserId}/context/TRAVELER/reports/${encodedReportId}/expenses`,
+            { method: "GET" },
+            "getExpensesV4"
+        );
+        const data = await response.json();
+        return { expenses: data.expenses || [] };
+    }
+
     async getExpenseDetails(expenseId: string) {
         const encodedId = encodeURIComponent(expenseId);
         const response = await this.fetchWithRetry(
@@ -532,7 +547,7 @@ export class ConcurService {
     }
 
     async addExpenseAttendee(params: {
-        entryId: string;
+        expenseId: string;
         attendeeId: string;
         reportId: string;
         amount: number;
@@ -559,10 +574,10 @@ export class ConcurService {
 
         const encodedUserId = encodeURIComponent(userId);
         const encodedReportId = encodeURIComponent(params.reportId);
-        const encodedEntryId = encodeURIComponent(params.entryId);
+        const encodedExpenseId = encodeURIComponent(params.expenseId);
 
         const response = await this.fetchWithRetry(
-            `${this.baseUrl}/expensereports/v4/users/${encodedUserId}/context/TRAVELER/reports/${encodedReportId}/expenses/${encodedEntryId}/attendees`,
+            `${this.baseUrl}/expensereports/v4/users/${encodedUserId}/context/TRAVELER/reports/${encodedReportId}/expenses/${encodedExpenseId}/attendees`,
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
