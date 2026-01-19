@@ -3,7 +3,7 @@ version: '3.8'
 services:
   concur-mcp:
     build: ./concur-mcp-server
-    image: ghcr.io/ihoffman/concur-mcp-server:latest
+    image: ghcr.io/drrock77/concur-mcp-server:latest
     ports:
       - "3000:3000"
     environment:
@@ -16,7 +16,7 @@ services:
 
   tripit-mcp:
     build: ./tripit-mcp-server
-    image: ghcr.io/ihoffman/tripit-mcp-server:latest
+    image: ghcr.io/drrock77/tripit-mcp-server:latest
     ports:
       - "3001:3001"
     environment:
