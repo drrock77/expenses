@@ -761,26 +761,58 @@ export class ConcurService {
             throw new Error(`No receipt found for expense ${entryId}`);
         }
 
-        const imageResponse = await fetch(receiptInfo.url, {
-            headers: {
-                "Authorization": `Bearer ${this.accessToken}`,
-            },
-        });
+        console.error(`Downloading receipt from: ${receiptInfo.url}`);
 
-        if (!imageResponse.ok) {
-            throw new Error(`Failed to download receipt: ${imageResponse.status} ${imageResponse.statusText}`);
+        // Concur image URLs may be relative or use different domains
+        let imageUrl = receiptInfo.url;
+        if (imageUrl.startsWith('/')) {
+            imageUrl = `${this.baseUrl}${imageUrl}`;
         }
 
-        const imageBuffer = await imageResponse.arrayBuffer();
-        const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
-        const base64Data = Buffer.from(imageBuffer).toString('base64');
+        // Try with fetchWithRetry first (handles auth properly)
+        try {
+            const response = await this.fetchWithRetry(
+                imageUrl,
+                { method: "GET" },
+                `downloadReceipt(${entryId})`,
+                false // don't retry on 401 for images
+            );
+            const imageBuffer = await response.arrayBuffer();
+            const contentType = response.headers.get("content-type") || "image/jpeg";
+            const base64Data = Buffer.from(imageBuffer).toString('base64');
 
-        return {
-            entryId,
-            contentType,
-            base64Data,
-            sizeBytes: imageBuffer.byteLength,
-        };
+            return {
+                entryId,
+                contentType,
+                base64Data,
+                sizeBytes: imageBuffer.byteLength,
+                url: imageUrl,
+            };
+        } catch (error) {
+            // Fallback: try direct fetch with Bearer token
+            console.error(`fetchWithRetry failed, trying direct fetch: ${error}`);
+            const imageResponse = await fetch(imageUrl, {
+                headers: {
+                    "Authorization": `Bearer ${this.accessToken}`,
+                },
+            });
+
+            if (!imageResponse.ok) {
+                throw new Error(`Failed to download receipt: ${imageResponse.status} ${imageResponse.statusText} from ${imageUrl}`);
+            }
+
+            const imageBuffer = await imageResponse.arrayBuffer();
+            const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
+            const base64Data = Buffer.from(imageBuffer).toString('base64');
+
+            return {
+                entryId,
+                contentType,
+                base64Data,
+                sizeBytes: imageBuffer.byteLength,
+                url: imageUrl,
+            };
+        }
     }
 
     async copyReceiptBetweenExpenses(sourceEntryId: string, targetEntryId: string) {
