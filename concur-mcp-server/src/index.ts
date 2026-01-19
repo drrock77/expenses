@@ -580,7 +580,9 @@ server.tool(
     {
         entryId: z.string().describe("The ID of the expense entry"),
         attendeeId: z.string().describe("The ID of the attendee to add"),
-        amount: z.number().optional().describe("Amount to allocate to this attendee"),
+        reportId: z.string().describe("The ID of the report containing the expense"),
+        amount: z.number().describe("Amount to allocate to this attendee"),
+        currencyCode: z.string().describe("Currency code (e.g., USD)"),
         associatedAttendeeCount: z.number().optional().describe("Number of additional unnamed attendees"),
     },
     async (args) => {

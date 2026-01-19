@@ -21,6 +21,7 @@ export class ConcurService {
     private baseUrl = "https://us2.api.concursolutions.com";
     private tokenUrl = "https://us.api.concursolutions.com/oauth2/v0/token";
     private tokenRefreshInProgress = false;
+    private cachedUserId: string | null = null;
 
     constructor(config: { accessToken?: string; refreshToken?: string; clientId?: string; clientSecret?: string }) {
         if (config.accessToken) {
@@ -31,6 +32,23 @@ export class ConcurService {
         }
         this.clientId = config.clientId;
         this.clientSecret = config.clientSecret;
+    }
+
+    private getUserIdFromToken(): string {
+        if (this.cachedUserId) return this.cachedUserId;
+        if (!this.accessToken) {
+            throw new Error("No access token available to extract user ID");
+        }
+        const parts = this.accessToken.split('.');
+        if (parts.length !== 3) {
+            throw new Error("Invalid JWT token format");
+        }
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+        if (!payload.sub) {
+            throw new Error("No user ID (sub) in token payload");
+        }
+        this.cachedUserId = payload.sub;
+        return payload.sub;
     }
 
     private async refreshAccessToken() {
@@ -516,20 +534,35 @@ export class ConcurService {
     async addExpenseAttendee(params: {
         entryId: string;
         attendeeId: string;
-        amount?: number;
+        reportId: string;
+        amount: number;
+        currencyCode: string;
         associatedAttendeeCount?: number;
     }) {
-        const body: Record<string, unknown> = {
-            EntryID: params.entryId,
-            AttendeeID: params.attendeeId,
+        await this.ensureToken();
+        const userId = this.getUserIdFromToken();
+
+        const attendeeEntry: Record<string, unknown> = {
+            attendeeId: params.attendeeId,
+            transactionAmount: {
+                value: params.amount,
+                currencyCode: params.currencyCode,
+            },
         };
-        if (params.amount !== undefined) body.Amount = params.amount;
         if (params.associatedAttendeeCount !== undefined) {
-            body.AssociatedAttendeeCount = params.associatedAttendeeCount;
+            attendeeEntry.associatedAttendeeCount = params.associatedAttendeeCount;
         }
 
+        const body = {
+            expenseAttendeeList: [attendeeEntry],
+        };
+
+        const encodedUserId = encodeURIComponent(userId);
+        const encodedReportId = encodeURIComponent(params.reportId);
+        const encodedEntryId = encodeURIComponent(params.entryId);
+
         const response = await this.fetchWithRetry(
-            `${this.baseUrl}/api/v3.0/expense/entryattendeeassociations`,
+            `${this.baseUrl}/expensereports/v4/users/${encodedUserId}/context/TRAVELER/reports/${encodedReportId}/expenses/${encodedEntryId}/attendees`,
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -751,7 +784,9 @@ export class ConcurService {
     }
 
     async addExpenseComment(entryId: string, comment: string, reportId?: string) {
-        // Get reportId from expense if not provided
+        await this.ensureToken();
+        const userId = this.getUserIdFromToken();
+
         let resolvedReportId = reportId;
         if (!resolvedReportId) {
             const existing = await this.getExpenseDetails(entryId);
@@ -762,14 +797,14 @@ export class ConcurService {
             throw new Error("Could not determine ReportID for expense. Please provide reportId parameter.");
         }
 
-        // Use v4 comments endpoint - much cleaner than updating the whole expense
+        const encodedUserId = encodeURIComponent(userId);
         const encodedReportId = encodeURIComponent(resolvedReportId);
         const encodedEntryId = encodeURIComponent(entryId);
 
         await this.fetchWithRetry(
-            `${this.baseUrl}/expensereports/v4/reports/${encodedReportId}/expenses/${encodedEntryId}/comments`,
+            `${this.baseUrl}/expensereports/v4/users/${encodedUserId}/context/TRAVELER/reports/${encodedReportId}/expenses/${encodedEntryId}/comments`,
             {
-                method: "PUT",
+                method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ comment }),
             },
