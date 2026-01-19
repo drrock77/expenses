@@ -783,6 +783,29 @@ server.tool(
     }
 );
 
+// Tool: copy_receipt
+server.tool(
+    "copy_receipt",
+    "Copy a receipt from one expense to another. Useful for migrating expenses between reports.",
+    {
+        sourceEntryId: z.string().describe("The ID of the source expense entry (has the receipt)"),
+        targetEntryId: z.string().describe("The ID of the target expense entry (to copy receipt to)"),
+    },
+    async ({ sourceEntryId, targetEntryId }) => {
+        try {
+            const result = await concurService.copyReceiptBetweenExpenses(sourceEntryId, targetEntryId);
+            return {
+                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
 // Tool: submit_report
 server.tool(
     "submit_report",
@@ -841,6 +864,7 @@ This server provides tools to interact with the SAP Concur API.
 - **get_receipt_image_url**: Get receipt image URL for an expense.
 - **list_report_receipts**: List all receipts on a report.
 - **upload_receipt**: Upload a receipt image to an expense.
+- **copy_receipt**: Copy a receipt from one expense to another (for migrations).
 
 ### Attendees
 - **search_attendees**: Search for existing attendees.

@@ -753,6 +753,45 @@ export class ConcurService {
         };
     }
 
+    async copyReceiptBetweenExpenses(sourceEntryId: string, targetEntryId: string) {
+        await this.ensureToken();
+
+        // Get the receipt URL from source expense
+        const receiptInfo = await this.getReceiptImageUrl(sourceEntryId);
+        if (!receiptInfo.url) {
+            throw new Error(`No receipt found for expense ${sourceEntryId}`);
+        }
+
+        // Download the image with OAuth authentication
+        const imageResponse = await fetch(receiptInfo.url, {
+            headers: {
+                "Authorization": `Bearer ${this.accessToken}`,
+            },
+        });
+
+        if (!imageResponse.ok) {
+            throw new Error(`Failed to download receipt: ${imageResponse.status} ${imageResponse.statusText}`);
+        }
+
+        const imageBuffer = await imageResponse.arrayBuffer();
+        const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
+
+        // Upload to target expense
+        const uploadResult = await this.uploadReceiptToExpense(
+            targetEntryId,
+            Buffer.from(imageBuffer),
+            contentType
+        );
+
+        return {
+            success: true,
+            sourceEntryId,
+            targetEntryId,
+            receiptId: uploadResult.id,
+            receiptUrl: uploadResult.url,
+        };
+    }
+
     async submitReport(reportId: string) {
         // The submit workflow action endpoint
         const response = await this.fetchWithRetry(
