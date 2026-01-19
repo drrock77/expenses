@@ -24,9 +24,15 @@ const refreshToken = process.env.CONCUR_REFRESH_TOKEN;
 const clientId = process.env.CONCUR_CLIENT_ID;
 const clientSecret = process.env.CONCUR_CLIENT_SECRET;
 
-if (!accessToken && !refreshToken && (!clientId || !clientSecret)) {
-    console.error("Error: At least one of CONCUR_ACCESS_TOKEN, CONCUR_REFRESH_TOKEN, or (CONCUR_CLIENT_ID and CONCUR_CLIENT_SECRET) is required.");
+// Validate: Need refresh token + client credentials, OR access token
+if (!accessToken && (!refreshToken || !clientId || !clientSecret)) {
+    console.error("Error: Either CONCUR_ACCESS_TOKEN, or (CONCUR_REFRESH_TOKEN + CONCUR_CLIENT_ID + CONCUR_CLIENT_SECRET) is required.");
+    console.error("Recommended: Use refresh token + client credentials for automatic token refresh.");
     process.exit(1);
+}
+
+if (!accessToken && refreshToken) {
+    console.error("Starting with refresh token - will fetch access token on first API call.");
 }
 
 const concurService = new ConcurService({
