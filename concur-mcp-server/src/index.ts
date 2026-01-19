@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import express, { Request, Response } from "express";
 import { z } from "zod";
 import { ConcurService } from "./concur-service.js";
 import dotenv from "dotenv";
@@ -14,10 +16,8 @@ const envPath = path.resolve(__dirname, "../.env");
 
 dotenv.config({ path: envPath });
 
-const server = new McpServer({
-    name: "concur-mcp-server",
-    version: "0.1.0",
-});
+const PORT = parseInt(process.env.PORT || "3000", 10);
+const USE_STDIO = process.argv.includes("--stdio");
 
 const accessToken = process.env.CONCUR_ACCESS_TOKEN;
 const refreshToken = process.env.CONCUR_REFRESH_TOKEN;
@@ -36,16 +36,20 @@ const concurService = new ConcurService({
     clientSecret
 });
 
-// Helper to format errors
-const formatError = (error: unknown) => {
-    if (error instanceof Error) {
-        return `Error: ${error.message}`;
-    }
-    return `Unknown error: ${String(error)}`;
-};
+function createServer(): McpServer {
+    const server = new McpServer({
+        name: "concur-mcp-server",
+        version: "0.1.0",
+    });
 
-// Tool: list_concur_reports
-server.tool(
+    const formatError = (error: unknown) => {
+        if (error instanceof Error) {
+            return `Error: ${error.message}`;
+        }
+        return `Unknown error: ${String(error)}`;
+    };
+
+    server.tool(
     "list_concur_reports",
     "List active Concur expense reports",
     {},
@@ -583,10 +587,65 @@ This server provides tools to interact with the SAP Concur API.
     }
 );
 
-async function main() {
+    return server;
+}
+
+async function runStdioServer() {
+    const server = createServer();
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error("Concur MCP Server running on stdio");
+}
+
+async function runHttpServer() {
+    const app = express();
+
+    const transports = new Map<string, SSEServerTransport>();
+
+    app.get("/sse", async (req: Request, res: Response) => {
+        console.log("New SSE connection");
+
+        const transport = new SSEServerTransport("/messages", res);
+        const sessionId = crypto.randomUUID();
+        transports.set(sessionId, transport);
+
+        const server = createServer();
+
+        res.on("close", () => {
+            console.log(`SSE connection closed: ${sessionId}`);
+            transports.delete(sessionId);
+        });
+
+        await server.connect(transport);
+    });
+
+    app.post("/messages", express.json(), async (req: Request, res: Response) => {
+        const sessionId = req.query.sessionId as string;
+        const transport = transports.get(sessionId);
+
+        if (!transport) {
+            res.status(400).json({ error: "No active session" });
+            return;
+        }
+
+        await transport.handlePostMessage(req, res);
+    });
+
+    app.get("/health", (req: Request, res: Response) => {
+        res.json({ status: "ok", service: "concur-mcp-server" });
+    });
+
+    app.listen(PORT, () => {
+        console.log(`Concur MCP Server running on http://localhost:${PORT}`);
+        console.log(`SSE endpoint: http://localhost:${PORT}/sse`);
+    });
+}
+
+async function main() {
+    if (USE_STDIO) {
+        await runStdioServer();
+    } else {
+        await runHttpServer();
+    }
 }
 
 main().catch((error) => {
