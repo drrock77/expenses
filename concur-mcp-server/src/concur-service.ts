@@ -753,76 +753,115 @@ export class ConcurService {
         };
     }
 
-    async downloadReceipt(entryId: string) {
+    // List e-receipts (Lyft, Uber, etc.) from Receipts v4 API
+    async listEReceipts(limit: number = 50) {
         await this.ensureToken();
-
-        // First, get the receipt image ID from v1 API metadata
-        const receiptInfo = await this.getReceiptImageUrl(entryId);
-        const imageId = receiptInfo.id;
-
-        if (!imageId) {
-            throw new Error(`No receipt found for expense ${entryId}`);
-        }
-
-        console.error(`Found image ID: ${imageId}, trying v3 API...`);
-
-        // Try v3 API first - it returns JSON with image data or URL
-        try {
-            const v3Response = await this.fetchWithRetry(
-                `${this.baseUrl}/api/v3.0/expense/receiptimages/${imageId}`,
-                { method: "GET", headers: { "Accept": "application/json" } },
-                `downloadReceipt-v3(${imageId})`
-            );
-
-            const v3Data = await v3Response.json();
-            console.error(`v3 API response: ${JSON.stringify(v3Data)}`);
-
-            // v3 API may return Image property with base64 or a URL
-            if (v3Data.Image) {
-                return {
-                    entryId,
-                    imageId,
-                    contentType: "image/jpeg",
-                    base64Data: v3Data.Image,
-                    sizeBytes: v3Data.Image.length,
-                };
-            }
-        } catch (v3Error) {
-            console.error(`v3 API failed: ${v3Error}, trying v1 direct download...`);
-        }
-
-        // Fallback to v1 API direct download
-        const v1Url = `${this.baseUrl}/api/image/v1.0/expenseentry/${entryId}`;
-        console.error(`Trying v1 API direct: ${v1Url}`);
+        const userId = this.getUserIdFromToken();
 
         const response = await this.fetchWithRetry(
-            v1Url,
-            {
-                method: "GET",
-                headers: { "Accept": "image/png, image/jpeg, application/pdf, */*" }
-            },
-            `downloadReceipt-v1(${entryId})`
+            `https://us.api.concursolutions.com/receipts/v4/users/${userId}`,
+            { method: "GET", headers: { "Accept": "application/json" } },
+            "listEReceipts"
         );
 
-        const contentType = response.headers.get("content-type") || "image/jpeg";
+        const data = await response.json();
+        return data.receipts?.slice(0, limit).map((r: any) => ({
+            id: r.id,
+            merchant: r.receipt?.merchant?.name,
+            date: r.receipt?.dateTime,
+            total: r.receipt?.total,
+            imageUrl: r.image,
+        })) || [];
+    }
 
-        // Check if we got XML (metadata) instead of actual image
-        if (contentType.includes("xml")) {
-            const xml = await response.text();
-            console.error(`Got XML response instead of image: ${xml}`);
-            throw new Error(`Receipt API returned metadata instead of image. Try uploading receipts manually.`);
+    // Download e-receipt image from Receipts v4 API
+    async downloadEReceipt(receiptId: string) {
+        await this.ensureToken();
+
+        const response = await fetch(
+            `https://us.api.concursolutions.com/receipts/v4/${receiptId}/image`,
+            {
+                headers: { "Authorization": `Bearer ${this.accessToken}` }
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(`Failed to download e-receipt: ${response.status}`);
         }
 
         const imageBuffer = await response.arrayBuffer();
+        const contentType = response.headers.get("content-type") || "image/png";
         const base64Data = Buffer.from(imageBuffer).toString('base64');
 
         return {
-            entryId,
-            imageId,
+            receiptId,
             contentType,
             base64Data,
             sizeBytes: imageBuffer.byteLength,
         };
+    }
+
+    // Download receipt - tries multiple APIs
+    async downloadReceipt(entryId: string) {
+        await this.ensureToken();
+
+        // For legacy receipts attached to expenses, the Image v1/v3 APIs
+        // return URLs that require mTLS authentication which we can't use.
+        // Only e-receipts (Lyft, Uber, etc.) via Receipts v4 API are downloadable.
+
+        // First check if this is an e-receipt ID (UUID format)
+        if (entryId.match(/^[a-f0-9]{32}$/i)) {
+            console.error(`ID looks like e-receipt UUID, trying Receipts v4...`);
+            try {
+                return await this.downloadEReceipt(entryId);
+            } catch (e) {
+                console.error(`Receipts v4 failed: ${e}`);
+            }
+        }
+
+        // Try Image v1 API to get metadata
+        const receiptInfo = await this.getReceiptImageUrl(entryId);
+
+        if (!receiptInfo.id) {
+            throw new Error(`No receipt found for expense ${entryId}`);
+        }
+
+        // Check if URL requires mTLS (contains ConcurConnectMTLS)
+        if (receiptInfo.url?.includes('ConcurConnectMTLS')) {
+            throw new Error(
+                `Receipt download not available - image requires mTLS authentication. ` +
+                `For legacy receipts, download manually from Concur web UI. ` +
+                `E-receipts (Lyft, Uber) can be downloaded via list_ereceipts tool.`
+            );
+        }
+
+        // Try to fetch the URL directly (unlikely to work but worth trying)
+        try {
+            const response = await fetch(receiptInfo.url!, {
+                headers: { "Authorization": `Bearer ${this.accessToken}` }
+            });
+
+            if (response.ok) {
+                const contentType = response.headers.get("content-type") || "image/jpeg";
+                if (!contentType.includes("xml")) {
+                    const imageBuffer = await response.arrayBuffer();
+                    return {
+                        entryId,
+                        contentType,
+                        base64Data: Buffer.from(imageBuffer).toString('base64'),
+                        sizeBytes: imageBuffer.byteLength,
+                    };
+                }
+            }
+        } catch (e) {
+            console.error(`Direct URL fetch failed: ${e}`);
+        }
+
+        throw new Error(
+            `Could not download receipt for expense ${entryId}. ` +
+            `Legacy receipts require mTLS authentication. ` +
+            `Use upload_receipt to attach receipts from your computer.`
+        );
     }
 
     async copyReceiptBetweenExpenses(sourceEntryId: string, targetEntryId: string) {

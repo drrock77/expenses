@@ -789,12 +789,56 @@ server.tool(
     }
 );
 
+// Tool: list_ereceipts
+server.tool(
+    "list_ereceipts",
+    "List e-receipts from connected apps (Lyft, Uber, etc.). These are receipts submitted via Receipts v4 API and can be downloaded.",
+    {
+        limit: z.number().optional().default(20).describe("Maximum number of e-receipts to return"),
+    },
+    async ({ limit }) => {
+        try {
+            const receipts = await concurService.listEReceipts(limit);
+            return {
+                content: [{ type: "text", text: JSON.stringify(receipts, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// Tool: download_ereceipt
+server.tool(
+    "download_ereceipt",
+    "Download an e-receipt image (from Lyft, Uber, etc.). Use list_ereceipts to find receipt IDs. Returns base64-encoded image.",
+    {
+        receiptId: z.string().describe("The e-receipt ID (UUID format from list_ereceipts)"),
+    },
+    async ({ receiptId }) => {
+        try {
+            const result = await concurService.downloadEReceipt(receiptId);
+            return {
+                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
 // Tool: download_receipt
 server.tool(
     "download_receipt",
-    "Download a receipt image from an expense with OAuth authentication. Returns base64-encoded image data that can be used with upload_receipt.",
+    "Download receipt from expense entry. NOTE: Legacy receipts on completed reports require mTLS and cannot be downloaded. Use list_ereceipts for e-receipts or upload_receipt to attach files from your computer.",
     {
-        entryId: z.string().describe("The ID of the expense entry"),
+        entryId: z.string().describe("The expense entry ID or e-receipt UUID"),
     },
     async ({ entryId }) => {
         try {
