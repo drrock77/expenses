@@ -584,17 +584,16 @@ export class ConcurService {
 
     async searchAttendees(searchTerm: string) {
         const response = await this.fetchWithRetry(
-            `${this.baseUrl}/api/v3.0/common/attendees?attendeeTypeCode=BUSGUEST&limit=25`,
+            `${this.baseUrl}/v4/attendees?attendeeTypeCode=BUSGUEST&limit=100`,
             { method: "GET" },
             "searchAttendees"
         );
         const data = await response.json();
-        const items = data.Items || [];
+        const items = data.attendees || data.Items || [];
 
-        // Filter by search term (name or company)
         const filtered = items.filter((a: any) => {
-            const name = `${a.FirstName || ''} ${a.LastName || ''}`.toLowerCase();
-            const company = (a.Company || '').toLowerCase();
+            const name = `${a.firstName || a.FirstName || ''} ${a.lastName || a.LastName || ''}`.toLowerCase();
+            const company = (a.company || a.Company || '').toLowerCase();
             const term = searchTerm.toLowerCase();
             return name.includes(term) || company.includes(term);
         });
@@ -608,17 +607,20 @@ export class ConcurService {
         company?: string;
         title?: string;
         attendeeTypeCode?: string;
+        externalId?: string;
     }) {
+        const uniqueId = params.externalId || `ext-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         const body: Record<string, unknown> = {
-            FirstName: params.firstName,
-            LastName: params.lastName,
-            AttendeeTypeCode: params.attendeeTypeCode || 'BUSGUEST',
+            firstName: params.firstName,
+            lastName: params.lastName,
+            attendeeTypeCode: params.attendeeTypeCode || 'BUSGUEST',
+            externalId: uniqueId,
         };
-        if (params.company) body.Company = params.company;
-        if (params.title) body.Title = params.title;
+        if (params.company) body.company = params.company;
+        if (params.title) body.title = params.title;
 
         const response = await this.fetchWithRetry(
-            `${this.baseUrl}/api/v3.0/common/attendees`,
+            `${this.baseUrl}/v4/attendees`,
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

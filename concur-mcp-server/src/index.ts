@@ -647,12 +647,13 @@ server.tool(
 // Tool: create_attendee
 server.tool(
     "create_attendee",
-    "Create a new attendee record",
+    "Create a new attendee record (v4 API)",
     {
         firstName: z.string().describe("Attendee's first name"),
         lastName: z.string().describe("Attendee's last name"),
         company: z.string().optional().describe("Attendee's company"),
         title: z.string().optional().describe("Attendee's job title"),
+        externalId: z.string().optional().describe("External identifier (auto-generated if not provided)"),
     },
     async (args) => {
         try {
