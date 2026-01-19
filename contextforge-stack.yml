@@ -68,10 +68,11 @@ services:
       CONCUR_REFRESH_TOKEN: ${CONCUR_REFRESH_TOKEN}
       CONCUR_CLIENT_ID: ${CONCUR_CLIENT_ID}
       CONCUR_CLIENT_SECRET: ${CONCUR_CLIENT_SECRET}
+      PORT: "3001"
     restart: unless-stopped
     networks: [contextforge_net]
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -84,11 +85,11 @@ services:
       TRIPIT_API_SECRET: ${TRIPIT_API_SECRET}
       TRIPIT_ACCESS_TOKEN: ${TRIPIT_ACCESS_TOKEN}
       TRIPIT_ACCESS_TOKEN_SECRET: ${TRIPIT_ACCESS_TOKEN_SECRET}
-      PORT: "3001"
+      PORT: "3002"
     restart: unless-stopped
     networks: [contextforge_net]
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3002/health"]
       interval: 30s
       timeout: 10s
       retries: 3
