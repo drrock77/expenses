@@ -567,6 +567,23 @@ export class ConcurService {
         return { Items: data.Items || [] };
     }
 
+    async getExpenseAttendeesV4(params: { expenseId: string; reportId: string }) {
+        await this.ensureToken();
+        const userId = this.getUserIdFromToken();
+        const normalizedExpenseId = this.normalizeExpenseId(params.expenseId);
+        const encodedUserId = encodeURIComponent(userId);
+        const encodedReportId = encodeURIComponent(params.reportId);
+        const encodedExpenseId = encodeURIComponent(normalizedExpenseId);
+
+        const response = await this.fetchWithRetry(
+            `${this.baseUrl}/expensereports/v4/users/${encodedUserId}/context/TRAVELER/reports/${encodedReportId}/expenses/${encodedExpenseId}/attendees`,
+            { method: "GET" },
+            "getExpenseAttendeesV4"
+        );
+        const data = await response.json();
+        return data.expenseAttendeeList || [];
+    }
+
     async addExpenseAttendee(params: {
         expenseId: string;
         attendeeId: string;
@@ -579,19 +596,40 @@ export class ConcurService {
         const userId = this.getUserIdFromToken();
         const normalizedExpenseId = this.normalizeExpenseId(params.expenseId);
 
-        const attendeeEntry: Record<string, unknown> = {
+        // Fetch existing attendees - POST REPLACES all attendees, so we must include existing ones
+        const existingAttendees = await this.getExpenseAttendeesV4({
+            expenseId: normalizedExpenseId,
+            reportId: params.reportId,
+        });
+
+        // Build list with existing attendees (preserve their amounts) + new attendee
+        const allAttendees: Record<string, unknown>[] = existingAttendees.map((existing: any) => ({
+            attendeeId: existing.attendeeId,
+            transactionAmount: existing.transactionAmount,
+            approvedAmount: existing.approvedAmount || existing.transactionAmount,
+            associatedAttendeeCount: existing.associatedAttendeeCount,
+            versionNumber: existing.versionNumber,
+        }));
+
+        // Add new attendee
+        const newAttendeeEntry: Record<string, unknown> = {
             attendeeId: params.attendeeId,
             transactionAmount: {
                 value: params.amount,
                 currencyCode: params.currencyCode,
             },
+            approvedAmount: {
+                value: params.amount,
+                currencyCode: params.currencyCode,
+            },
         };
         if (params.associatedAttendeeCount !== undefined) {
-            attendeeEntry.associatedAttendeeCount = params.associatedAttendeeCount;
+            newAttendeeEntry.associatedAttendeeCount = params.associatedAttendeeCount;
         }
+        allAttendees.push(newAttendeeEntry);
 
         const body = {
-            expenseAttendeeList: [attendeeEntry],
+            expenseAttendeeList: allAttendees,
         };
 
         const encodedUserId = encodeURIComponent(userId);
