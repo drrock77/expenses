@@ -313,16 +313,12 @@ export class ConcurService {
     async updateExpense(expenseId: string, updates: UpdateExpenseParams) {
         const existing = await this.getExpenseDetails(expenseId);
 
-        // Only include writable fields - exclude read-only fields returned by GET
+        // Only include simple writable fields - exclude Custom fields (they're complex objects)
         const writableFields = [
             'TransactionDate', 'ExpenseTypeCode', 'TransactionAmount',
             'TransactionCurrencyCode', 'VendorDescription', 'Description',
             'Comment', 'PaymentTypeID', 'ReportID', 'LocationID',
-            'IsBillable', 'IsPersonal', 'Custom1', 'Custom2', 'Custom3',
-            'Custom4', 'Custom5', 'Custom6', 'Custom7', 'Custom8',
-            'Custom9', 'Custom10', 'Custom11', 'Custom12', 'Custom13',
-            'Custom14', 'Custom15', 'Custom16', 'Custom17', 'Custom18',
-            'Custom19', 'Custom20', 'Custom21', 'Custom22', 'Custom23', 'Custom24'
+            'IsBillable', 'IsPersonal'
         ];
 
         const body: Record<string, unknown> = {};
