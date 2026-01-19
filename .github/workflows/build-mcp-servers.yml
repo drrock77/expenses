@@ -100,22 +100,25 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   # Trigger Komodo to redeploy the stack after images are built
+  # NOTE: Requires KOMODO_WEBHOOK_URL secret if Komodo is behind Pangolin
   deploy-to-komodo:
     needs: [build-concur, build-tripit]
     if: always() && (needs.build-concur.result == 'success' || needs.build-tripit.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Komodo Stack Redeploy
-        if: env.KOMODO_URL != ''
+        env:
+          KOMODO_WEBHOOK_URL: ${{ secrets.KOMODO_WEBHOOK_URL }}
+        if: env.KOMODO_WEBHOOK_URL != ''
         run: |
-          # Komodo uses webhooks or API calls to trigger deployments
-          # Option 1: Use Komodo webhook (configure in Komodo UI)
-          # Option 2: Use Komodo API with komodo_client
-
-          # Using curl to call Komodo API
-          curl -X POST "$KOMODO_URL/api/execute/DeployStack" \
+          # Call Komodo webhook (configure bypass in Pangolin for this path)
+          # Example: https://komodo.drrock.me/api/webhook/YOUR_WEBHOOK_ID
+          curl -X POST "$KOMODO_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
-            -H "X-API-KEY: $KOMODO_API_KEY" \
-            -H "X-API-SECRET: $KOMODO_API_SECRET" \
-            -d '{"stack": "contextforge"}' \
-            --fail-with-body || echo "Komodo deploy trigger failed (may need webhook instead)"
+            --fail-with-body || echo "Komodo webhook failed"
+
+      - name: Skip deploy notification
+        if: env.KOMODO_WEBHOOK_URL == ''
+        run: |
+          echo "KOMODO_WEBHOOK_URL not set - skipping auto-deploy"
+          echo "To deploy: Pull images manually in Komodo UI or run 'docker compose pull && docker compose up -d'"

@@ -60,7 +60,7 @@ services:
   # ========== MCP Servers ==========
 
   concur-mcp:
-    image: ghcr.io/ihoffman/concur-mcp-server:latest
+    image: ghcr.io/ihoffman_hrbs/concur-mcp-server:latest
     container_name: concur-mcp-server
     environment:
       CONCUR_BASE_URL: ${CONCUR_BASE_URL:-https://us.api.concursolutions.com}
@@ -77,7 +77,7 @@ services:
       retries: 3
 
   tripit-mcp:
-    image: ghcr.io/ihoffman/tripit-mcp-server:latest
+    image: ghcr.io/ihoffman_hrbs/tripit-mcp-server:latest
     container_name: tripit-mcp-server
     environment:
       TRIPIT_API_KEY: ${TRIPIT_API_KEY}
