@@ -1,4 +1,17 @@
-import { CreateExpenseParams, CreateReportParams, UpdateExpenseParams, ConcurApiError } from './types.js';
+import { CreateExpenseParams, CreateReportParams, UpdateExpenseParams, ConcurApiError, PerDiemRate, PerDiemCalculation, PerDiemDayDetail, CreateItemizationParams, ConcurLocation } from './types.js';
+
+const PER_DIEM_RATES: PerDiemRate[] = [
+    // US Locations
+    { location: "New York City", aliases: ["NYC", "New York", "Manhattan"], country: "US", fullDay: 92.00, partialDay: 69.00 },
+    { location: "San Francisco", aliases: ["SF", "Bay Area"], country: "US", fullDay: 92.00, partialDay: 69.00 },
+    { location: "Boston", aliases: [], country: "US", fullDay: 18.00, partialDay: 18.00 },
+    { location: "All Other US", aliases: ["US", "USA", "United States"], country: "US", fullDay: 74.00, partialDay: 56.00, isDefault: true },
+    // International Locations
+    { location: "Switzerland", aliases: ["Zurich", "Geneva", "Basel"], country: "CH", fullDay: 150.00, partialDay: 112.50 },
+    { location: "London", aliases: ["UK", "United Kingdom", "England"], country: "GB", fullDay: 150.00, partialDay: 112.50 },
+    { location: "Copenhagen", aliases: ["Denmark"], country: "DK", fullDay: 150.00, partialDay: 112.50 },
+    { location: "Rest of World", aliases: ["International", "Other"], country: "INTL", fullDay: 100.00, partialDay: 75.00, isDefault: true },
+];
 
 export class ConcurService {
     private accessToken: string | null = null;
@@ -221,8 +234,9 @@ export class ConcurService {
     }
 
     async getExpenseDetails(expenseId: string) {
+        const encodedId = encodeURIComponent(expenseId);
         const response = await this.fetchWithRetry(
-            `${this.baseUrl}/api/v3.0/expense/entries/${expenseId}`,
+            `${this.baseUrl}/api/v3.0/expense/entries/${encodedId}`,
             { method: "GET" },
             `getExpenseDetails(${expenseId})`
         );
@@ -230,17 +244,58 @@ export class ConcurService {
     }
 
     async createExpense(expenseDetails: CreateExpenseParams) {
+        const isValid = await this.validateExpenseTypeCode(expenseDetails.expenseTypeCode);
+        if (!isValid) {
+            const validTypes = await this.getExpenseTypes();
+            const validCodes = validTypes.map(t => t.Code).join(', ');
+            throw new Error(
+                `Invalid ExpenseTypeCode: "${expenseDetails.expenseTypeCode}". ` +
+                `Valid codes for your expense group: ${validCodes || 'none found'}`
+            );
+        }
+
+        let paymentTypeId = expenseDetails.paymentTypeId;
+        if (!paymentTypeId) {
+            paymentTypeId = await this.resolvePaymentTypeId(expenseDetails.paymentTypeName);
+        }
+
+        let locationId = expenseDetails.locationId;
+        if (!locationId && expenseDetails.locationCity) {
+            const locations = await this.searchLocations(expenseDetails.locationCity);
+            if (locations.length > 0) {
+                locationId = locations[0].ID;
+            }
+        }
+
         const body: Record<string, unknown> = {
             TransactionDate: expenseDetails.transactionDate,
             ExpenseTypeCode: expenseDetails.expenseTypeCode,
-            BusinessPurpose: expenseDetails.businessPurpose,
             VendorDescription: expenseDetails.vendorDescription,
             TransactionAmount: expenseDetails.transactionAmount,
-            CurrencyCode: expenseDetails.currencyCode,
+            TransactionCurrencyCode: expenseDetails.currencyCode,
+            PaymentTypeID: paymentTypeId,
         };
 
         if (expenseDetails.reportId) {
             body.ReportID = expenseDetails.reportId;
+        }
+        if (locationId) {
+            body.LocationID = locationId;
+        }
+        if (expenseDetails.comment) {
+            body.Comment = expenseDetails.comment;
+        }
+        if (expenseDetails.description) {
+            body.Description = expenseDetails.description;
+        }
+        if (expenseDetails.businessPurpose) {
+            body.Description = expenseDetails.businessPurpose;
+        }
+        if (expenseDetails.isBillable !== undefined) {
+            body.IsBillable = expenseDetails.isBillable;
+        }
+        if (expenseDetails.isPersonal !== undefined) {
+            body.IsPersonal = expenseDetails.isPersonal;
         }
 
         const response = await this.fetchWithRetry(
@@ -257,18 +312,38 @@ export class ConcurService {
 
     async updateExpense(expenseId: string, updates: UpdateExpenseParams) {
         const existing = await this.getExpenseDetails(expenseId);
-        const body: Record<string, unknown> = { ...existing };
 
+        // Only include writable fields - exclude read-only fields returned by GET
+        const writableFields = [
+            'TransactionDate', 'ExpenseTypeCode', 'TransactionAmount',
+            'TransactionCurrencyCode', 'VendorDescription', 'Description',
+            'Comment', 'PaymentTypeID', 'ReportID', 'LocationID',
+            'IsBillable', 'IsPersonal', 'Custom1', 'Custom2', 'Custom3',
+            'Custom4', 'Custom5', 'Custom6', 'Custom7', 'Custom8',
+            'Custom9', 'Custom10', 'Custom11', 'Custom12', 'Custom13',
+            'Custom14', 'Custom15', 'Custom16', 'Custom17', 'Custom18',
+            'Custom19', 'Custom20', 'Custom21', 'Custom22', 'Custom23', 'Custom24'
+        ];
+
+        const body: Record<string, unknown> = {};
+        for (const field of writableFields) {
+            if (existing[field] !== undefined) {
+                body[field] = existing[field];
+            }
+        }
+
+        // Apply updates
         if (updates.transactionDate) body.TransactionDate = updates.transactionDate;
         if (updates.expenseTypeCode) body.ExpenseTypeCode = updates.expenseTypeCode;
-        if (updates.businessPurpose) body.BusinessPurpose = updates.businessPurpose;
+        if (updates.businessPurpose) body.Description = updates.businessPurpose;
         if (updates.vendorDescription) body.VendorDescription = updates.vendorDescription;
         if (updates.transactionAmount) body.TransactionAmount = updates.transactionAmount;
-        if (updates.currencyCode) body.CurrencyCode = updates.currencyCode;
+        if (updates.currencyCode) body.TransactionCurrencyCode = updates.currencyCode;
         if (updates.reportId) body.ReportID = updates.reportId;
 
+        const encodedId = encodeURIComponent(expenseId);
         await this.fetchWithRetry(
-            `${this.baseUrl}/api/v3.0/expense/entries/${expenseId}`,
+            `${this.baseUrl}/api/v3.0/expense/entries/${encodedId}`,
             {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
@@ -280,41 +355,61 @@ export class ConcurService {
     }
 
     async deleteExpense(expenseId: string) {
+        const encodedId = encodeURIComponent(expenseId);
         await this.fetchWithRetry(
-            `${this.baseUrl}/api/v3.0/expense/entries/${expenseId}`,
+            `${this.baseUrl}/api/v3.0/expense/entries/${encodedId}`,
             { method: "DELETE" },
             `deleteExpense(${expenseId})`
         );
         return true;
     }
 
+    async deleteReport(reportId: string) {
+        const encodedId = encodeURIComponent(reportId);
+        await this.fetchWithRetry(
+            `${this.baseUrl}/api/v3.0/expense/reports/${encodedId}`,
+            { method: "DELETE" },
+            `deleteReport(${reportId})`
+        );
+        return true;
+    }
+
+    async getExpenseGroupConfigurations() {
+        const response = await this.fetchWithRetry(
+            `${this.baseUrl}/api/v3.0/expense/expensegroupconfigurations`,
+            { method: "GET" },
+            "getExpenseGroupConfigurations"
+        );
+        const data = await response.json();
+        return data;
+    }
+
     async getExpenseTypes() {
         try {
-            // Note: This endpoint might vary based on Concur configuration, 
-            // but usually it's under list items or configuration.
-            // For now, we'll try a common endpoint or return a placeholder if not easily available via standard v3.
-            // v3.0/common/listitems is one place, or v3.0/expense/expensetypes (if available)
-            // Let's assume v3.0/expense/configuration/expensetypes exists or similar.
-            // Actually, v3.0 doesn't have a direct 'expensetypes' endpoint documented publicly always.
-            // We might need to use v1.1 or v3.1 if available.
-            // Let's try a safe bet: v3.0/common/listitems if we knew the list ID.
-            // Without a known list ID, we might just return a static list or try to fetch from a known config.
+            const config = await this.getExpenseGroupConfigurations();
+            const expenseTypes: Array<{ Code: string; Name: string; ExpenseCode: string }> = [];
 
-            // For this implementation, let's try to fetch from a likely endpoint, or return empty if not found.
-            // A common pattern is to just let the user type the code, but the tool asks for 'get_concur_expense_types'.
+            if (config.Items && config.Items.length > 0) {
+                for (const item of config.Items) {
+                    if (item.Policies) {
+                        for (const policy of item.Policies) {
+                            if (policy.ExpenseTypes) {
+                                for (const et of policy.ExpenseTypes) {
+                                    if (!expenseTypes.find(e => e.Code === et.Code)) {
+                                        expenseTypes.push({
+                                            Code: et.Code,
+                                            Name: et.Name,
+                                            ExpenseCode: et.ExpenseCode || ''
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
-            // Let's try to fetch recent expenses and extract unique types as a heuristic if no direct endpoint.
-            // Or better, let's try to hit a standard endpoint.
-
-            // Placeholder implementation as specific endpoint requires more discovery
-            return [
-                { Code: "AIRFR", Name: "Airfare" },
-                { Code: "HOTEL", Name: "Hotel" },
-                { Code: "MEALS", Name: "Meals" },
-                { Code: "TAXI", Name: "Taxi" },
-                { Code: "PRKNG", Name: "Parking" },
-                { Code: "CAR", Name: "Car Rental" }
-            ];
+            return expenseTypes;
         } catch (error) {
             console.error("Error fetching expense types:", error);
             return [];
@@ -323,15 +418,54 @@ export class ConcurService {
 
     async getPaymentTypes() {
         try {
-            // Placeholder implementation
-            return [
-                { Code: "CASH", Name: "Cash" },
-                { Code: "CORP", Name: "Corporate Card" }
-            ];
+            const config = await this.getExpenseGroupConfigurations();
+            const paymentTypes: Array<{ ID: string; Name: string; IsDefault: boolean }> = [];
+
+            if (config.Items && config.Items.length > 0) {
+                for (const item of config.Items) {
+                    if (item.PaymentTypes) {
+                        for (const pt of item.PaymentTypes) {
+                            if (!paymentTypes.find(p => p.ID === pt.ID)) {
+                                paymentTypes.push({
+                                    ID: pt.ID,
+                                    Name: pt.Name,
+                                    IsDefault: pt.IsDefault || false
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            return paymentTypes;
         } catch (error) {
             console.error("Error fetching payment types:", error);
             return [];
         }
+    }
+
+    async resolvePaymentTypeId(paymentTypeName?: string): Promise<string> {
+        const paymentTypes = await this.getPaymentTypes();
+
+        if (paymentTypeName) {
+            const match = paymentTypes.find(pt =>
+                pt.Name.toLowerCase().includes(paymentTypeName.toLowerCase()) ||
+                paymentTypeName.toLowerCase().includes(pt.Name.toLowerCase())
+            );
+            if (match) return match.ID;
+        }
+
+        const defaultType = paymentTypes.find(pt => pt.IsDefault);
+        if (defaultType) return defaultType.ID;
+
+        if (paymentTypes.length > 0) return paymentTypes[0].ID;
+
+        throw new Error("No payment types available. Cannot create expense without PaymentTypeID.");
+    }
+
+    async validateExpenseTypeCode(code: string): Promise<boolean> {
+        const expenseTypes = await this.getExpenseTypes();
+        return expenseTypes.some(et => et.Code === code);
     }
 
     async getUserProfile() {
@@ -562,5 +696,233 @@ export class ConcurService {
             `submitReport(${reportId})`
         );
         return { success: true, reportId };
+    }
+
+    async searchLocations(city: string): Promise<ConcurLocation[]> {
+        const response = await this.fetchWithRetry(
+            `${this.baseUrl}/api/v3.0/common/locations?city=${encodeURIComponent(city)}&limit=10`,
+            { method: "GET" },
+            `searchLocations(${city})`
+        );
+        const data = await response.json();
+        return (data.Items || []).map((item: any) => ({
+            ID: item.ID,
+            Name: item.Name,
+            City: item.City,
+            Country: item.Country,
+            IATACode: item.IATACode
+        }));
+    }
+
+    async createItemization(params: CreateItemizationParams) {
+        const body: Record<string, unknown> = {
+            EntryID: params.entryId,
+            ReportID: params.reportId,
+            ReportOwnerID: params.reportOwnerId,
+            ExpenseTypeCode: params.expenseTypeCode,
+            TransactionDate: params.transactionDate,
+            TransactionAmount: params.transactionAmount,
+        };
+
+        if (params.description) {
+            body.Description = params.description;
+        }
+        if (params.comment) {
+            body.Comment = params.comment;
+        }
+
+        const response = await this.fetchWithRetry(
+            `${this.baseUrl}/api/v3.0/expense/itemizations`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            },
+            "createItemization"
+        );
+        return await response.json();
+    }
+
+    async getItemizations(reportId: string, entryId?: string) {
+        let url = `${this.baseUrl}/api/v3.0/expense/itemizations?reportID=${reportId}&limit=100`;
+        if (entryId) {
+            url += `&entryID=${entryId}`;
+        }
+        const response = await this.fetchWithRetry(url, { method: "GET" }, "getItemizations");
+        const data = await response.json();
+        return { Items: data.Items || [] };
+    }
+
+    async addExpenseComment(entryId: string, comment: string) {
+        const existing = await this.getExpenseDetails(entryId);
+
+        // Only include writable fields
+        const writableFields = [
+            'TransactionDate', 'ExpenseTypeCode', 'TransactionAmount',
+            'TransactionCurrencyCode', 'VendorDescription', 'Description',
+            'Comment', 'PaymentTypeID', 'ReportID', 'LocationID',
+            'IsBillable', 'IsPersonal'
+        ];
+
+        const body: Record<string, unknown> = {};
+        for (const field of writableFields) {
+            if (existing[field] !== undefined) {
+                body[field] = existing[field];
+            }
+        }
+        body.Comment = comment;
+
+        const encodedId = encodeURIComponent(entryId);
+        await this.fetchWithRetry(
+            `${this.baseUrl}/api/v3.0/expense/entries/${encodedId}`,
+            {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            },
+            `addExpenseComment(${entryId})`
+        );
+        return { success: true, entryId, comment };
+    }
+
+    getPerDiemRates(): PerDiemRate[] {
+        return PER_DIEM_RATES;
+    }
+
+    findPerDiemRate(location: string): PerDiemRate {
+        const normalizedLocation = location.toLowerCase().trim();
+
+        for (const rate of PER_DIEM_RATES) {
+            if (rate.location.toLowerCase() === normalizedLocation) {
+                return rate;
+            }
+            for (const alias of rate.aliases) {
+                if (alias.toLowerCase() === normalizedLocation) {
+                    return rate;
+                }
+            }
+        }
+
+        for (const rate of PER_DIEM_RATES) {
+            if (rate.location.toLowerCase().includes(normalizedLocation) ||
+                normalizedLocation.includes(rate.location.toLowerCase())) {
+                return rate;
+            }
+            for (const alias of rate.aliases) {
+                if (alias.toLowerCase().includes(normalizedLocation) ||
+                    normalizedLocation.includes(alias.toLowerCase())) {
+                    return rate;
+                }
+            }
+        }
+
+        const isUS = normalizedLocation.includes('us') ||
+                     normalizedLocation.includes('united states') ||
+                     normalizedLocation.includes('america') ||
+                     /^[a-z]{2}$/.test(normalizedLocation);
+
+        const defaultRate = PER_DIEM_RATES.find(r =>
+            r.isDefault && (isUS ? r.country === 'US' : r.country === 'INTL')
+        );
+
+        return defaultRate || PER_DIEM_RATES.find(r => r.isDefault && r.country === 'INTL')!;
+    }
+
+    calculatePerDiem(startDate: string, endDate: string, location: string): PerDiemCalculation {
+        const rate = this.findPerDiemRate(location);
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+            throw new Error("Invalid date format. Use YYYY-MM-DD.");
+        }
+
+        if (end < start) {
+            throw new Error("End date must be after start date.");
+        }
+
+        const breakdown: PerDiemDayDetail[] = [];
+        const dayMs = 24 * 60 * 60 * 1000;
+        const totalDays = Math.round((end.getTime() - start.getTime()) / dayMs) + 1;
+
+        let currentDate = new Date(start);
+        let dayIndex = 0;
+
+        while (currentDate <= end) {
+            const dateStr = currentDate.toISOString().split('T')[0];
+            let dayType: 'first' | 'last' | 'full';
+            let dayRate: number;
+
+            if (totalDays === 1) {
+                dayType = 'first';
+                dayRate = rate.partialDay;
+            } else if (dayIndex === 0) {
+                dayType = 'first';
+                dayRate = rate.partialDay;
+            } else if (dayIndex === totalDays - 1) {
+                dayType = 'last';
+                dayRate = rate.partialDay;
+            } else {
+                dayType = 'full';
+                dayRate = rate.fullDay;
+            }
+
+            breakdown.push({
+                date: dateStr,
+                dayType,
+                rate: dayRate,
+                location: rate.location
+            });
+
+            currentDate = new Date(currentDate.getTime() + dayMs);
+            dayIndex++;
+        }
+
+        const fullDays = breakdown.filter(d => d.dayType === 'full').length;
+        const partialDays = breakdown.filter(d => d.dayType !== 'full').length;
+        const totalAmount = breakdown.reduce((sum, d) => sum + d.rate, 0);
+
+        return {
+            location: rate.location,
+            startDate,
+            endDate,
+            totalDays,
+            fullDays,
+            partialDays,
+            fullDayRate: rate.fullDay,
+            partialDayRate: rate.partialDay,
+            totalAmount,
+            breakdown
+        };
+    }
+
+    async createPerDiemExpenses(
+        reportId: string,
+        startDate: string,
+        endDate: string,
+        location: string,
+        businessPurpose: string,
+        perDiemExpenseTypeCode?: string
+    ): Promise<{ calculation: PerDiemCalculation; expenses: any[] }> {
+        const calculation = this.calculatePerDiem(startDate, endDate, location);
+
+        const expenseTypeCode = perDiemExpenseTypeCode || 'MEALN';
+
+        const expenses: any[] = [];
+
+        for (const day of calculation.breakdown) {
+            const expense = await this.createExpense({
+                reportId,
+                transactionDate: day.date,
+                expenseTypeCode,
+                transactionAmount: day.rate,
+                currencyCode: 'USD',
+                vendorDescription: `Per Diem - ${day.location}`,
+                businessPurpose: `${businessPurpose} (${day.dayType === 'full' ? 'Full Day' : 'Travel Day'})`
+            });
+            expenses.push(expense);
+        }
+
+        return { calculation, expenses };
     }
 }

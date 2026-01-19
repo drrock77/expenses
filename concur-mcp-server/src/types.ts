@@ -35,6 +35,33 @@ export interface CreateExpenseParams {
     transactionAmount: number;
     currencyCode: string;
     reportId?: string;
+    paymentTypeId?: string;
+    paymentTypeName?: string;
+    locationId?: string;
+    locationCity?: string;
+    comment?: string;
+    description?: string;
+    isBillable?: boolean;
+    isPersonal?: boolean;
+}
+
+export interface CreateItemizationParams {
+    entryId: string;
+    reportId: string;
+    reportOwnerId: string;
+    expenseTypeCode: string;
+    transactionDate: string;
+    transactionAmount: number;
+    description?: string;
+    comment?: string;
+}
+
+export interface ConcurLocation {
+    ID: string;
+    Name: string;
+    City: string;
+    Country: string;
+    IATACode?: string;
 }
 
 export interface UpdateExpenseParams {
@@ -51,4 +78,33 @@ export interface ConcurApiError extends Error {
     status: number;
     statusText: string;
     body?: unknown;
+}
+
+export interface PerDiemRate {
+    location: string;
+    aliases: string[];
+    country: string;
+    fullDay: number;
+    partialDay: number;
+    isDefault?: boolean;
+}
+
+export interface PerDiemDayDetail {
+    date: string;
+    dayType: 'first' | 'last' | 'full';
+    rate: number;
+    location: string;
+}
+
+export interface PerDiemCalculation {
+    location: string;
+    startDate: string;
+    endDate: string;
+    totalDays: number;
+    fullDays: number;
+    partialDays: number;
+    fullDayRate: number;
+    partialDayRate: number;
+    totalAmount: number;
+    breakdown: PerDiemDayDetail[];
 }

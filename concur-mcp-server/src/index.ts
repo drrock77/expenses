@@ -114,6 +114,28 @@ server.tool(
     }
 );
 
+// Tool: delete_concur_report
+server.tool(
+    "delete_concur_report",
+    "Delete a Concur expense report. Only works on reports that haven't been submitted.",
+    {
+        reportId: z.string().describe("The ID of the report to delete"),
+    },
+    async ({ reportId }) => {
+        try {
+            await concurService.deleteReport(reportId);
+            return {
+                content: [{ type: "text", text: `Report ${reportId} deleted successfully.` }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
 // Tool: list_concur_expenses
 server.tool(
     "list_concur_expenses",
@@ -161,15 +183,22 @@ server.tool(
 // Tool: create_concur_expense
 server.tool(
     "create_concur_expense",
-    "Create a new Concur expense entry",
+    "Create a new Concur expense entry. PaymentTypeID and LocationID are auto-resolved if not provided.",
     {
         transactionDate: z.string().describe("Date of the transaction (YYYY-MM-DD)"),
-        expenseTypeCode: z.string().describe("Expense type code (e.g., AIRFR, MEALS)"),
-        businessPurpose: z.string().describe("Business purpose of the expense"),
-        vendorDescription: z.string().describe("Vendor description"),
+        expenseTypeCode: z.string().describe("Expense type code - must match your expense group. Use get_expense_group_config to get valid codes."),
+        businessPurpose: z.string().describe("Business purpose/description of the expense (maps to Description field)"),
+        vendorDescription: z.string().describe("Vendor name/description"),
         transactionAmount: z.number().describe("Amount of the transaction"),
         currencyCode: z.string().describe("Currency code (e.g., USD)"),
-        reportId: z.string().optional().describe("Optional Report ID to assign the expense to"),
+        reportId: z.string().describe("Report ID to assign the expense to (required by Concur API)"),
+        paymentTypeId: z.string().optional().describe("Payment type ID (internal Concur ID). Auto-resolved if not provided."),
+        paymentTypeName: z.string().optional().describe("Payment type name to match (e.g., 'Cash', 'Company Paid')."),
+        locationId: z.string().optional().describe("Location ID (internal Concur ID). Auto-resolved from locationCity if not provided."),
+        locationCity: z.string().optional().describe("City name for location lookup (e.g., 'London', 'New York'). Used to auto-resolve LocationID."),
+        comment: z.string().optional().describe("Comment for the expense (max 500 chars). Use for justification on high-value expenses."),
+        isBillable: z.boolean().optional().describe("Whether expense is billable to client"),
+        isPersonal: z.boolean().optional().describe("Whether expense is personal (non-reimbursable)"),
     },
     async (args) => {
         try {
@@ -260,13 +289,215 @@ server.tool(
 // Tool: get_concur_payment_types
 server.tool(
     "get_concur_payment_types",
-    "Get available Concur payment types",
+    "Get available Concur payment types with their internal IDs (required for expense creation)",
     {},
     async () => {
         try {
             const types = await concurService.getPaymentTypes();
             return {
                 content: [{ type: "text", text: JSON.stringify(types, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// Tool: get_expense_group_config
+server.tool(
+    "get_expense_group_config",
+    "Get the user's expense group configuration including valid expense types and payment types with their internal IDs. Call this before creating expenses to get valid codes.",
+    {},
+    async () => {
+        try {
+            const config = await concurService.getExpenseGroupConfigurations();
+            return {
+                content: [{ type: "text", text: JSON.stringify(config, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// Tool: get_per_diem_rates
+server.tool(
+    "get_per_diem_rates",
+    "Get the company's per diem rates by location. Returns full day and partial day (first/last day) rates for US and international locations.",
+    {},
+    async () => {
+        try {
+            const rates = concurService.getPerDiemRates();
+            return {
+                content: [{ type: "text", text: JSON.stringify(rates, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// Tool: calculate_per_diem
+server.tool(
+    "calculate_per_diem",
+    "Calculate per diem for a trip. First and last days are partial (75%), middle days are full rate. Returns breakdown by day and total amount.",
+    {
+        startDate: z.string().describe("Trip start date (YYYY-MM-DD)"),
+        endDate: z.string().describe("Trip end date (YYYY-MM-DD)"),
+        location: z.string().describe("Location (e.g., 'NYC', 'San Francisco', 'London', 'Switzerland'). Uses default rate if location not found."),
+    },
+    async ({ startDate, endDate, location }) => {
+        try {
+            const calculation = concurService.calculatePerDiem(startDate, endDate, location);
+            return {
+                content: [{ type: "text", text: JSON.stringify(calculation, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// Tool: create_per_diem_expenses
+server.tool(
+    "create_per_diem_expenses",
+    "Calculate and create per diem expense entries for a trip. Creates one expense per day with correct rates for first/last (partial) and full days.",
+    {
+        reportId: z.string().describe("Report ID to add per diem expenses to"),
+        startDate: z.string().describe("Trip start date (YYYY-MM-DD)"),
+        endDate: z.string().describe("Trip end date (YYYY-MM-DD)"),
+        location: z.string().describe("Location for per diem rates (e.g., 'NYC', 'London')"),
+        businessPurpose: z.string().describe("Business purpose for the trip"),
+        expenseTypeCode: z.string().optional().describe("Expense type code for per diem (default: MEALN). Check get_expense_group_config for valid codes."),
+    },
+    async ({ reportId, startDate, endDate, location, businessPurpose, expenseTypeCode }) => {
+        try {
+            const result = await concurService.createPerDiemExpenses(
+                reportId,
+                startDate,
+                endDate,
+                location,
+                businessPurpose,
+                expenseTypeCode
+            );
+            return {
+                content: [{
+                    type: "text",
+                    text: JSON.stringify({
+                        message: `Created ${result.expenses.length} per diem expenses totaling $${result.calculation.totalAmount.toFixed(2)}`,
+                        calculation: result.calculation,
+                        expenseIds: result.expenses.map((e: any) => e.ID || e.id)
+                    }, null, 2)
+                }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// Tool: search_locations
+server.tool(
+    "search_locations",
+    "Search for Concur location IDs by city name. Use this to get LocationID for expense creation.",
+    {
+        city: z.string().describe("City name to search for (e.g., 'London', 'New York', 'San Francisco')"),
+    },
+    async ({ city }) => {
+        try {
+            const locations = await concurService.searchLocations(city);
+            return {
+                content: [{ type: "text", text: JSON.stringify(locations, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// Tool: create_expense_itemization
+server.tool(
+    "create_expense_itemization",
+    "Create an itemization for a parent expense entry. Use for hotel breakdowns (room rate, tax, fees) or other itemized expenses.",
+    {
+        entryId: z.string().describe("The parent expense entry ID"),
+        reportId: z.string().describe("The report ID"),
+        reportOwnerId: z.string().describe("The report owner's login ID (email)"),
+        expenseTypeCode: z.string().describe("Expense type code for the itemization (e.g., LODTX for hotel tax)"),
+        transactionDate: z.string().describe("Date of the itemization (YYYY-MM-DD)"),
+        transactionAmount: z.number().describe("Amount for this itemization"),
+        description: z.string().optional().describe("Description (max 64 chars)"),
+        comment: z.string().optional().describe("Comment (max 500 chars)"),
+    },
+    async (args) => {
+        try {
+            const result = await concurService.createItemization(args);
+            return {
+                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// Tool: get_expense_itemizations
+server.tool(
+    "get_expense_itemizations",
+    "Get itemizations for a report or specific expense entry",
+    {
+        reportId: z.string().describe("The report ID"),
+        entryId: z.string().optional().describe("Optional entry ID to filter itemizations"),
+    },
+    async ({ reportId, entryId }) => {
+        try {
+            const result = await concurService.getItemizations(reportId, entryId);
+            return {
+                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// Tool: add_expense_comment
+server.tool(
+    "add_expense_comment",
+    "Add or update a comment on an expense entry. Use for justification on high-value expenses or policy exceptions.",
+    {
+        entryId: z.string().describe("The expense entry ID"),
+        comment: z.string().describe("Comment text (max 500 chars)"),
+    },
+    async ({ entryId, comment }) => {
+        try {
+            const result = await concurService.addExpenseComment(entryId, comment);
+            return {
+                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
             };
         } catch (error) {
             return {
@@ -550,7 +781,7 @@ This server provides tools to interact with the SAP Concur API.
 ### Expenses
 - **list_concur_expenses**: List expenses, optionally filtered by report.
 - **get_concur_expense_details**: Get details of a specific expense.
-- **create_concur_expense**: Create a new expense entry.
+- **create_concur_expense**: Create a new expense entry (auto-resolves PaymentTypeID).
 - **update_concur_expense**: Update an existing expense.
 - **delete_concur_expense**: Delete an expense.
 
@@ -569,18 +800,45 @@ This server provides tools to interact with the SAP Concur API.
 - **add_expense_attendee**: Add an attendee to an expense.
 - **remove_expense_attendee**: Remove an attendee from an expense.
 
+### Per Diem
+- **get_per_diem_rates**: Get company per diem rates by location.
+- **calculate_per_diem**: Calculate per diem for dates/location (preview without creating).
+- **create_per_diem_expenses**: Create per diem expense entries for a trip.
+
 ### Configuration
-- **get_concur_expense_types**: List available expense types.
-- **get_concur_payment_types**: List available payment types.
+- **get_expense_group_config**: Get full expense group config with valid expense types and payment type IDs.
+- **get_concur_expense_types**: List available expense types for your group.
+- **get_concur_payment_types**: List payment types with internal IDs.
 - **test_concur_connection**: Verify API connectivity.
+
+## Per Diem Rates (2025)
+
+### US Locations
+| Location | Full Day | First/Last Day |
+|----------|----------|----------------|
+| NYC/SF | $92.00 | $69.00 |
+| Boston | $18.00 | $18.00 |
+| Other US | $74.00 | $56.00 |
+
+### International
+| Location | Full Day | First/Last Day |
+|----------|----------|----------------|
+| Switzerland/London/Copenhagen | $150.00 | $112.50 |
+| Rest of World | $100.00 | $75.00 |
 
 ## Workflow Tips
 
-1. Use \`list_card_charges\` to see unassigned card transactions
-2. Use \`create_concur_expense\` to create expenses from card charges
-3. Use \`upload_receipt\` to attach receipt images
-4. For meals/entertainment, use \`search_attendees\` or \`create_attendee\`, then \`add_expense_attendee\`
-5. Use \`submit_report\` when report is complete
+1. **IMPORTANT**: Before creating expenses, call \`get_expense_group_config\` to get valid expense type codes and payment type IDs for your user's expense group.
+2. Use \`list_card_charges\` to see unassigned card transactions.
+3. Use \`create_concur_expense\` to create expenses - PaymentTypeID is auto-resolved from your expense group config.
+4. Use \`upload_receipt\` to attach receipt images.
+5. For meals/entertainment, use \`search_attendees\` or \`create_attendee\`, then \`add_expense_attendee\`.
+6. Use \`submit_report\` when report is complete.
+
+## Common Errors
+
+- "Invalid ExpenseTypeCode" - Use \`get_expense_group_config\` to see valid codes for your expense group.
+- "PaymentTypeID required" - This is now auto-resolved, but you can specify paymentTypeName (e.g., "Cash", "Company Paid").
 `
             }],
         };
