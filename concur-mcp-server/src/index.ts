@@ -598,6 +598,7 @@ async function runStdioServer() {
 
 async function runHttpServer() {
     const app = express();
+    app.use(express.json());
 
     const transports = new Map<string, SSEServerTransport>();
 
@@ -605,20 +606,19 @@ async function runHttpServer() {
         console.log("New SSE connection");
 
         const transport = new SSEServerTransport("/messages", res);
-        const sessionId = crypto.randomUUID();
-        transports.set(sessionId, transport);
+        transports.set(transport.sessionId, transport);
 
         const server = createServer();
 
         res.on("close", () => {
-            console.log(`SSE connection closed: ${sessionId}`);
-            transports.delete(sessionId);
+            console.log(`SSE connection closed: ${transport.sessionId}`);
+            transports.delete(transport.sessionId);
         });
 
         await server.connect(transport);
     });
 
-    app.post("/messages", express.json(), async (req: Request, res: Response) => {
+    app.post("/messages", async (req: Request, res: Response) => {
         const sessionId = req.query.sessionId as string;
         const transport = transports.get(sessionId);
 
@@ -627,7 +627,7 @@ async function runHttpServer() {
             return;
         }
 
-        await transport.handlePostMessage(req, res);
+        await transport.handlePostMessage(req, res, req.body);
     });
 
     app.get("/health", (req: Request, res: Response) => {
