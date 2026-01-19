@@ -1,0 +1,121 @@
+name: Build MCP Servers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'concur-mcp-server/**'
+      - 'tripit-mcp-server/**'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  KOMODO_URL: ${{ secrets.KOMODO_URL }}
+  KOMODO_API_KEY: ${{ secrets.KOMODO_API_KEY }}
+  KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET }}
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      concur: ${{ steps.filter.outputs.concur }}
+      tripit: ${{ steps.filter.outputs.tripit }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            concur:
+              - 'concur-mcp-server/**'
+            tripit:
+              - 'tripit-mcp-server/**'
+
+  build-concur:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.concur == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/concur-mcp-server
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./concur-mcp-server
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  build-tripit:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.tripit == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/tripit-mcp-server
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./tripit-mcp-server
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # Trigger Komodo to redeploy the stack after images are built
+  deploy-to-komodo:
+    needs: [build-concur, build-tripit]
+    if: always() && (needs.build-concur.result == 'success' || needs.build-tripit.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Komodo Stack Redeploy
+        if: env.KOMODO_URL != ''
+        run: |
+          # Komodo uses webhooks or API calls to trigger deployments
+          # Option 1: Use Komodo webhook (configure in Komodo UI)
+          # Option 2: Use Komodo API with komodo_client
+
+          # Using curl to call Komodo API
+          curl -X POST "$KOMODO_URL/api/execute/DeployStack" \
+            -H "Content-Type: application/json" \
+            -H "X-API-KEY: $KOMODO_API_KEY" \
+            -H "X-API-SECRET: $KOMODO_API_SECRET" \
+            -d '{"stack": "contextforge"}' \
+            --fail-with-body || echo "Komodo deploy trigger failed (may need webhook instead)"

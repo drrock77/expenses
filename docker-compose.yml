@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  concur-mcp:
+    build: ./concur-mcp-server
+    image: ghcr.io/ihoffman/concur-mcp-server:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - CONCUR_BASE_URL=${CONCUR_BASE_URL:-https://us.api.concursolutions.com}
+      - CONCUR_ACCESS_TOKEN=${CONCUR_ACCESS_TOKEN}
+      - CONCUR_REFRESH_TOKEN=${CONCUR_REFRESH_TOKEN}
+      - CONCUR_CLIENT_ID=${CONCUR_CLIENT_ID}
+      - CONCUR_CLIENT_SECRET=${CONCUR_CLIENT_SECRET}
+    restart: unless-stopped
+
+  tripit-mcp:
+    build: ./tripit-mcp-server
+    image: ghcr.io/ihoffman/tripit-mcp-server:latest
+    ports:
+      - "3001:3001"
+    environment:
+      - TRIPIT_API_KEY=${TRIPIT_API_KEY}
+      - TRIPIT_API_SECRET=${TRIPIT_API_SECRET}
+      - TRIPIT_ACCESS_TOKEN=${TRIPIT_ACCESS_TOKEN}
+      - TRIPIT_ACCESS_TOKEN_SECRET=${TRIPIT_ACCESS_TOKEN_SECRET}
+      - PORT=3001
+    restart: unless-stopped
+
+  contextforge:
+    image: ghcr.io/ibm/mcp-context-forge:latest
+    ports:
+      - "4444:4444"
+    environment:
+      - DATABASE_URL=sqlite:///./data/mcp.db
+      - HOST=0.0.0.0
+      - PORT=4444
+      - AUTH_REQUIRED=true
+      - BASIC_AUTH_USER=admin
+      - BASIC_AUTH_PASSWORD=${CONTEXTFORGE_PASSWORD:-changeme}
+    volumes:
+      - contextforge-data:/app/data
+    depends_on:
+      - concur-mcp
+      - tripit-mcp
+    restart: unless-stopped
+
+volumes:
+  contextforge-data:

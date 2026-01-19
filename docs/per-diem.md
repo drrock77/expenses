@@ -1,0 +1,8 @@
+| Region/Location                                | Standard Per Diem | First/Last Day Per Diem | Notes                                                   | Source |
+|-----------------------------------------------|-------------------|-------------------------|---------------------------------------------------------|--------|
+| US – New York City                            | $92.00            | $69.00                  |                                                         | HRBS_CPP_3.001_FA_Travel_Reimbursement_Policy.pdf ⟨turn0file0⟩ |
+| US – San Francisco                            | $92.00            | $69.00                  |                                                         | HRBS_CPP_3.001_FA_Travel_Reimbursement_Policy.pdf ⟨turn0file0⟩ |
+| US – All other locations                      | $74.00            | $56.00                  |                                                         | HRBS_CPP_3.001_FA_Travel_Reimbursement_Policy.pdf ⟨turn0file0⟩ |
+| International – Switzerland, London, Copenhagen| $150.00           | $112.50                 |                                                         | HRBS_CPP_3.001_FA_Travel_Reimbursement_Policy.pdf ⟨turn0file0⟩ |
+| International – Rest of World                 | $100.00           | $75.00                  |                                                         | HRBS_CPP_3.001_FA_Travel_Reimbursement_Policy.pdf ⟨turn0file0⟩ |
+| Inside 50‑mile limit (customer site)          | $20 lunch         | N/A                     | Reimbursed when ≥6 hours spent at a customer site       | HRBS_CPP_3.001_FA_Travel_Reimbursement_Policy.pdf ⟨turn0file0⟩ |

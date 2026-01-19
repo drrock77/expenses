@@ -1,0 +1,98 @@
+# ContextForge Stack with MCP Servers
+# Deploy on NUC via Komodo
+# Add to existing stack or use as reference
+
+services:
+  db:
+    image: postgres:18
+    container_name: contextforge-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${TZ}
+    volumes:
+      - /srv/containers/contextforge/postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [contextforge_net]
+
+  redis:
+    image: redis:7
+    container_name: contextforge-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - /srv/containers/contextforge/redis:/data
+    networks: [contextforge_net]
+
+  gateway:
+    image: ghcr.io/ibm/mcp-context-forge:1.0.0-BETA-1
+    container_name: contextforge-gateway
+    environment:
+      TZ: ${TZ}
+      HOST: ${HOST}
+      MCPGATEWAY_UI_ENABLED: ${MCPGATEWAY_UI_ENABLED}
+      MCPGATEWAY_ADMIN_API_ENABLED: ${MCPGATEWAY_ADMIN_API_ENABLED}
+      AUTH_REQUIRED: ${AUTH_REQUIRED}
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER}
+      BASIC_AUTH_PASSWORD: ${BASIC_AUTH_PASSWORD}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      AUTH_ENCRYPTION_SECRET: ${AUTH_ENCRYPTION_SECRET}
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD}
+      PLATFORM_ADMIN_FULL_NAME: ${PLATFORM_ADMIN_FULL_NAME}
+      SECURE_COOKIES: ${SECURE_COOKIES}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${GATEWAY_PORT}:4444"
+    volumes:
+      - /srv/containers/contextforge/gateway-data:/data
+    restart: unless-stopped
+    networks: [contextforge_net]
+
+  # ========== MCP Servers ==========
+
+  concur-mcp:
+    image: ghcr.io/ihoffman/concur-mcp-server:latest
+    container_name: concur-mcp-server
+    environment:
+      CONCUR_BASE_URL: ${CONCUR_BASE_URL:-https://us.api.concursolutions.com}
+      CONCUR_ACCESS_TOKEN: ${CONCUR_ACCESS_TOKEN}
+      CONCUR_REFRESH_TOKEN: ${CONCUR_REFRESH_TOKEN}
+      CONCUR_CLIENT_ID: ${CONCUR_CLIENT_ID}
+      CONCUR_CLIENT_SECRET: ${CONCUR_CLIENT_SECRET}
+    restart: unless-stopped
+    networks: [contextforge_net]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  tripit-mcp:
+    image: ghcr.io/ihoffman/tripit-mcp-server:latest
+    container_name: tripit-mcp-server
+    environment:
+      TRIPIT_API_KEY: ${TRIPIT_API_KEY}
+      TRIPIT_API_SECRET: ${TRIPIT_API_SECRET}
+      TRIPIT_ACCESS_TOKEN: ${TRIPIT_ACCESS_TOKEN}
+      TRIPIT_ACCESS_TOKEN_SECRET: ${TRIPIT_ACCESS_TOKEN_SECRET}
+      PORT: "3001"
+    restart: unless-stopped
+    networks: [contextforge_net]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  contextforge_net:
+    driver: bridge
