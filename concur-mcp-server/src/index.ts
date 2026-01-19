@@ -180,6 +180,28 @@ server.tool(
     }
 );
 
+// Tool: get_report_v4
+server.tool(
+    "get_report_v4",
+    "Get report details via v4 API - useful for debugging v4 ID formats",
+    {
+        reportId: z.string().describe("Report ID"),
+    },
+    async ({ reportId }) => {
+        try {
+            const report = await concurService.getReportV4(reportId);
+            return {
+                content: [{ type: "text", text: JSON.stringify(report, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
 // Tool: get_concur_expense_details
 server.tool(
     "get_concur_expense_details",

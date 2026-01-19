@@ -266,6 +266,20 @@ export class ConcurService {
         return { expenses: data.expenses || [], rawResponse: data };
     }
 
+    async getReportV4(reportId: string) {
+        await this.ensureToken();
+        const userId = this.getUserIdFromToken();
+        const encodedUserId = encodeURIComponent(userId);
+        const encodedReportId = encodeURIComponent(reportId);
+
+        const response = await this.fetchWithRetry(
+            `${this.baseUrl}/expensereports/v4/users/${encodedUserId}/context/TRAVELER/reports/${encodedReportId}`,
+            { method: "GET" },
+            "getReportV4"
+        );
+        return await response.json();
+    }
+
     private normalizeExpenseId(expenseId: string): string {
         if (expenseId.startsWith('gwr')) {
             return expenseId.substring(3);
