@@ -767,16 +767,44 @@ server.tool(
 // Tool: upload_receipt
 server.tool(
     "upload_receipt",
-    "Upload a receipt image to an expense entry. Provide base64-encoded image data.",
+    "Upload a receipt image to an expense entry. Provide EITHER imagePath (file path) OR imageBase64 (base64 data). File path is preferred for large images.",
     {
         entryId: z.string().describe("The ID of the expense entry"),
-        imageBase64: z.string().describe("Base64-encoded image data"),
-        contentType: z.enum(["application/pdf", "image/jpeg", "image/png"]).describe("MIME type of the image"),
+        imagePath: z.string().optional().describe("Path to the image file on disk (preferred for large images)"),
+        imageBase64: z.string().optional().describe("Base64-encoded image data (alternative to imagePath)"),
+        contentType: z.enum(["application/pdf", "image/jpeg", "image/png"]).optional().describe("MIME type (auto-detected from file extension if imagePath provided)"),
     },
-    async ({ entryId, imageBase64, contentType }) => {
+    async ({ entryId, imagePath, imageBase64, contentType }) => {
         try {
-            const imageBuffer = Buffer.from(imageBase64, 'base64');
-            const result = await concurService.uploadReceiptToExpense(entryId, imageBuffer, contentType);
+            let imageBuffer: Buffer;
+            let mimeType = contentType;
+
+            if (imagePath) {
+                const fs = await import('fs');
+                const path = await import('path');
+                if (!fs.existsSync(imagePath)) {
+                    throw new Error(`File not found: ${imagePath}`);
+                }
+                imageBuffer = fs.readFileSync(imagePath);
+                if (!mimeType) {
+                    const ext = path.extname(imagePath).toLowerCase();
+                    mimeType = ext === '.pdf' ? 'application/pdf' :
+                               ext === '.png' ? 'image/png' :
+                               ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : undefined;
+                    if (!mimeType) {
+                        throw new Error(`Cannot determine content type for extension: ${ext}. Provide contentType explicitly.`);
+                    }
+                }
+            } else if (imageBase64) {
+                imageBuffer = Buffer.from(imageBase64, 'base64');
+                if (!mimeType) {
+                    throw new Error("contentType is required when using imageBase64");
+                }
+            } else {
+                throw new Error("Either imagePath or imageBase64 must be provided");
+            }
+
+            const result = await concurService.uploadReceiptToExpense(entryId, imageBuffer, mimeType);
             return {
                 content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
             };
@@ -823,6 +851,45 @@ server.tool(
             const result = await concurService.downloadEReceipt(receiptId);
             return {
                 content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
+// Tool: save_ereceipt
+server.tool(
+    "save_ereceipt",
+    "Download an e-receipt and save it to a file. Returns the file path for use with upload_receipt. This is the recommended workflow for copying receipts to new expenses.",
+    {
+        receiptId: z.string().describe("The e-receipt ID (UUID format from list_ereceipts)"),
+        outputPath: z.string().optional().describe("File path to save (default: /tmp/receipt-{id}.png)"),
+    },
+    async ({ receiptId, outputPath }) => {
+        try {
+            const fs = await import('fs');
+            const path = await import('path');
+            const result = await concurService.downloadEReceipt(receiptId);
+            const ext = result.contentType === 'application/pdf' ? '.pdf' :
+                        result.contentType === 'image/jpeg' ? '.jpg' : '.png';
+            const filePath = outputPath || `/tmp/receipt-${receiptId.substring(0, 8)}${ext}`;
+            const dir = path.dirname(filePath);
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
+            fs.writeFileSync(filePath, Buffer.from(result.base64Data, 'base64'));
+            return {
+                content: [{ type: "text", text: JSON.stringify({
+                    success: true,
+                    filePath,
+                    contentType: result.contentType,
+                    sizeBytes: result.sizeBytes,
+                    message: `Saved to ${filePath}. Use upload_receipt with imagePath="${filePath}" to attach to an expense.`
+                }, null, 2) }],
             };
         } catch (error) {
             return {
