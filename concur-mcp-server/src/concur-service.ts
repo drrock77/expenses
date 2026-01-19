@@ -756,18 +756,52 @@ export class ConcurService {
     async downloadReceipt(entryId: string) {
         await this.ensureToken();
 
-        // Fetch image directly from Image v1 API (returns byte array)
-        // Don't use the URL from metadata - it requires mTLS
-        const imageApiUrl = `${this.baseUrl}/api/image/v1.0/expenseentry/${entryId}`;
-        console.error(`Downloading receipt directly from Image API: ${imageApiUrl}`);
+        // First, get the receipt image ID from v1 API metadata
+        const receiptInfo = await this.getReceiptImageUrl(entryId);
+        const imageId = receiptInfo.id;
+
+        if (!imageId) {
+            throw new Error(`No receipt found for expense ${entryId}`);
+        }
+
+        console.error(`Found image ID: ${imageId}, trying v3 API...`);
+
+        // Try v3 API first - it returns JSON with image data or URL
+        try {
+            const v3Response = await this.fetchWithRetry(
+                `${this.baseUrl}/api/v3.0/expense/receiptimages/${imageId}`,
+                { method: "GET", headers: { "Accept": "application/json" } },
+                `downloadReceipt-v3(${imageId})`
+            );
+
+            const v3Data = await v3Response.json();
+            console.error(`v3 API response: ${JSON.stringify(v3Data)}`);
+
+            // v3 API may return Image property with base64 or a URL
+            if (v3Data.Image) {
+                return {
+                    entryId,
+                    imageId,
+                    contentType: "image/jpeg",
+                    base64Data: v3Data.Image,
+                    sizeBytes: v3Data.Image.length,
+                };
+            }
+        } catch (v3Error) {
+            console.error(`v3 API failed: ${v3Error}, trying v1 direct download...`);
+        }
+
+        // Fallback to v1 API direct download
+        const v1Url = `${this.baseUrl}/api/image/v1.0/expenseentry/${entryId}`;
+        console.error(`Trying v1 API direct: ${v1Url}`);
 
         const response = await this.fetchWithRetry(
-            imageApiUrl,
+            v1Url,
             {
                 method: "GET",
                 headers: { "Accept": "image/png, image/jpeg, application/pdf, */*" }
             },
-            `downloadReceipt(${entryId})`
+            `downloadReceipt-v1(${entryId})`
         );
 
         const contentType = response.headers.get("content-type") || "image/jpeg";
@@ -776,7 +810,7 @@ export class ConcurService {
         if (contentType.includes("xml")) {
             const xml = await response.text();
             console.error(`Got XML response instead of image: ${xml}`);
-            throw new Error(`Receipt API returned metadata instead of image. The expense may not have a receipt attached.`);
+            throw new Error(`Receipt API returned metadata instead of image. Try uploading receipts manually.`);
         }
 
         const imageBuffer = await response.arrayBuffer();
@@ -784,6 +818,7 @@ export class ConcurService {
 
         return {
             entryId,
+            imageId,
             contentType,
             base64Data,
             sizeBytes: imageBuffer.byteLength,
