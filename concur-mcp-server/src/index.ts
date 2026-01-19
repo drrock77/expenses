@@ -488,14 +488,15 @@ server.tool(
 // Tool: add_expense_comment
 server.tool(
     "add_expense_comment",
-    "Add or update a comment on an expense entry. Use for justification on high-value expenses or policy exceptions.",
+    "Add or update a comment on an expense entry using the v4 API. Use for justification on high-value expenses or policy exceptions.",
     {
         entryId: z.string().describe("The expense entry ID"),
         comment: z.string().describe("Comment text (max 500 chars)"),
+        reportId: z.string().optional().describe("The report ID (optional - will be looked up from expense if not provided)"),
     },
-    async ({ entryId, comment }) => {
+    async ({ entryId, comment, reportId }) => {
         try {
-            const result = await concurService.addExpenseComment(entryId, comment);
+            const result = await concurService.addExpenseComment(entryId, comment, reportId);
             return {
                 content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
             };

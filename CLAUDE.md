@@ -79,3 +79,39 @@ CONCUR_CLIENT_SECRET=
 ## UI Components
 
 Uses shadcn/ui with Radix primitives. Component files in `components/ui/`. Custom components in `components/expenses/`, `components/dashboard/`, `components/layout/`.
+
+## MCP Servers Deployment
+
+### Architecture
+| Component | Port | Container Name |
+|-----------|------|----------------|
+| Concur MCP | 3001 | concur-mcp-server |
+| TripIt MCP | 3002 | tripit-mcp-server |
+| ContextForge Gateway | 4444 | contextforge-gateway |
+
+### CI/CD Pipeline
+- **Repo**: `drrock77/expenses` on GitHub
+- Push triggers GitHub Actions → builds images → pushes to GHCR
+- **Komodo**: Pull Images → Redeploy on NUC (192.168.2.58)
+
+### SSE Transport Session Management (IMPORTANT)
+The MCP SDK's `SSEServerTransport` generates its own internal `sessionId`. You MUST use `transport.sessionId` for the map lookup, not a separate UUID:
+
+```typescript
+// CORRECT:
+const transport = new SSEServerTransport("/messages", res);
+transports.set(transport.sessionId, transport);
+
+// WRONG - causes 400 errors:
+const sessionId = crypto.randomUUID();
+transports.set(sessionId, transport);
+```
+
+Also pass parsed body to handlePostMessage:
+```typescript
+await transport.handlePostMessage(req, res, req.body);
+```
+
+### ContextForge Registration URLs
+- Concur: `http://concur-mcp-server:3001/sse`
+- TripIt: `http://tripit-mcp-server:3002/sse`

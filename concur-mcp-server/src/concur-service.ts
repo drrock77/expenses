@@ -753,36 +753,32 @@ export class ConcurService {
         return { Items: data.Items || [] };
     }
 
-    async addExpenseComment(entryId: string, comment: string) {
-        const existing = await this.getExpenseDetails(entryId);
-
-        // Only include writable fields
-        const writableFields = [
-            'TransactionDate', 'ExpenseTypeCode', 'TransactionAmount',
-            'TransactionCurrencyCode', 'VendorDescription', 'Description',
-            'Comment', 'PaymentTypeID', 'ReportID', 'LocationID',
-            'IsBillable', 'IsPersonal'
-        ];
-
-        const body: Record<string, unknown> = {};
-        for (const field of writableFields) {
-            if (existing[field] !== undefined) {
-                body[field] = existing[field];
-            }
+    async addExpenseComment(entryId: string, comment: string, reportId?: string) {
+        // Get reportId from expense if not provided
+        let resolvedReportId = reportId;
+        if (!resolvedReportId) {
+            const existing = await this.getExpenseDetails(entryId);
+            resolvedReportId = existing.ReportID;
         }
-        body.Comment = comment;
 
-        const encodedId = encodeURIComponent(entryId);
+        if (!resolvedReportId) {
+            throw new Error("Could not determine ReportID for expense. Please provide reportId parameter.");
+        }
+
+        // Use v4 comments endpoint - much cleaner than updating the whole expense
+        const encodedReportId = encodeURIComponent(resolvedReportId);
+        const encodedEntryId = encodeURIComponent(entryId);
+
         await this.fetchWithRetry(
-            `${this.baseUrl}/api/v3.0/expense/entries/${encodedId}`,
+            `${this.baseUrl}/expensereports/v4/reports/${encodedReportId}/expenses/${encodedEntryId}/comments`,
             {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body),
+                body: JSON.stringify({ comment }),
             },
             `addExpenseComment(${entryId})`
         );
-        return { success: true, entryId, comment };
+        return { success: true, entryId, reportId: resolvedReportId, comment };
     }
 
     getPerDiemRates(): PerDiemRate[] {
