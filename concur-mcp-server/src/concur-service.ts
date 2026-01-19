@@ -263,7 +263,14 @@ export class ConcurService {
             "getExpensesV4"
         );
         const data = await response.json();
-        return { expenses: data.expenses || [] };
+        return { expenses: data.expenses || [], rawResponse: data };
+    }
+
+    private normalizeExpenseId(expenseId: string): string {
+        if (expenseId.startsWith('gwr')) {
+            return expenseId.substring(3);
+        }
+        return expenseId;
     }
 
     async getExpenseDetails(expenseId: string) {
@@ -556,6 +563,7 @@ export class ConcurService {
     }) {
         await this.ensureToken();
         const userId = this.getUserIdFromToken();
+        const normalizedExpenseId = this.normalizeExpenseId(params.expenseId);
 
         const attendeeEntry: Record<string, unknown> = {
             attendeeId: params.attendeeId,
@@ -574,7 +582,7 @@ export class ConcurService {
 
         const encodedUserId = encodeURIComponent(userId);
         const encodedReportId = encodeURIComponent(params.reportId);
-        const encodedExpenseId = encodeURIComponent(params.expenseId);
+        const encodedExpenseId = encodeURIComponent(normalizedExpenseId);
 
         const response = await this.fetchWithRetry(
             `${this.baseUrl}/expensereports/v4/users/${encodedUserId}/context/TRAVELER/reports/${encodedReportId}/expenses/${encodedExpenseId}/attendees`,
@@ -800,13 +808,14 @@ export class ConcurService {
         return { Items: data.Items || [] };
     }
 
-    async addExpenseComment(entryId: string, comment: string, reportId?: string) {
+    async addExpenseComment(expenseId: string, comment: string, reportId?: string) {
         await this.ensureToken();
         const userId = this.getUserIdFromToken();
+        const normalizedExpenseId = this.normalizeExpenseId(expenseId);
 
         let resolvedReportId = reportId;
         if (!resolvedReportId) {
-            const existing = await this.getExpenseDetails(entryId);
+            const existing = await this.getExpenseDetails(expenseId);
             resolvedReportId = existing.ReportID;
         }
 
@@ -816,18 +825,18 @@ export class ConcurService {
 
         const encodedUserId = encodeURIComponent(userId);
         const encodedReportId = encodeURIComponent(resolvedReportId);
-        const encodedEntryId = encodeURIComponent(entryId);
+        const encodedExpenseId = encodeURIComponent(normalizedExpenseId);
 
         await this.fetchWithRetry(
-            `${this.baseUrl}/expensereports/v4/users/${encodedUserId}/context/TRAVELER/reports/${encodedReportId}/expenses/${encodedEntryId}/comments`,
+            `${this.baseUrl}/expensereports/v4/users/${encodedUserId}/context/TRAVELER/reports/${encodedReportId}/expenses/${encodedExpenseId}/comments`,
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ comment }),
             },
-            `addExpenseComment(${entryId})`
+            `addExpenseComment(${expenseId})`
         );
-        return { success: true, entryId, reportId: resolvedReportId, comment };
+        return { success: true, expenseId, reportId: resolvedReportId, comment };
     }
 
     getPerDiemRates(): PerDiemRate[] {
