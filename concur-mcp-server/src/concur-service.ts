@@ -336,6 +336,7 @@ export class ConcurService {
         if (updates.transactionAmount) body.TransactionAmount = updates.transactionAmount;
         if (updates.currencyCode) body.TransactionCurrencyCode = updates.currencyCode;
         if (updates.reportId) body.ReportID = updates.reportId;
+        if (updates.locationId) body.LocationID = updates.locationId;
 
         const encodedId = encodeURIComponent(expenseId);
         await this.fetchWithRetry(

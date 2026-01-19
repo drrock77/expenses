@@ -72,6 +72,7 @@ export interface UpdateExpenseParams {
     transactionAmount?: number;
     currencyCode?: string;
     reportId?: string;
+    locationId?: string;
 }
 
 export interface ConcurApiError extends Error {

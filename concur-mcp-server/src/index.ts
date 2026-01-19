@@ -228,6 +228,7 @@ server.tool(
         transactionAmount: z.number().optional(),
         currencyCode: z.string().optional(),
         reportId: z.string().optional(),
+        locationId: z.string().optional().describe("Location ID (use search_locations to find valid IDs)"),
     },
     async ({ expenseId, ...updates }) => {
         try {
