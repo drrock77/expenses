@@ -753,16 +753,14 @@ export class ConcurService {
         };
     }
 
-    async copyReceiptBetweenExpenses(sourceEntryId: string, targetEntryId: string) {
+    async downloadReceipt(entryId: string) {
         await this.ensureToken();
 
-        // Get the receipt URL from source expense
-        const receiptInfo = await this.getReceiptImageUrl(sourceEntryId);
+        const receiptInfo = await this.getReceiptImageUrl(entryId);
         if (!receiptInfo.url) {
-            throw new Error(`No receipt found for expense ${sourceEntryId}`);
+            throw new Error(`No receipt found for expense ${entryId}`);
         }
 
-        // Download the image with OAuth authentication
         const imageResponse = await fetch(receiptInfo.url, {
             headers: {
                 "Authorization": `Bearer ${this.accessToken}`,
@@ -775,12 +773,23 @@ export class ConcurService {
 
         const imageBuffer = await imageResponse.arrayBuffer();
         const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
+        const base64Data = Buffer.from(imageBuffer).toString('base64');
 
-        // Upload to target expense
+        return {
+            entryId,
+            contentType,
+            base64Data,
+            sizeBytes: imageBuffer.byteLength,
+        };
+    }
+
+    async copyReceiptBetweenExpenses(sourceEntryId: string, targetEntryId: string) {
+        const downloaded = await this.downloadReceipt(sourceEntryId);
+
         const uploadResult = await this.uploadReceiptToExpense(
             targetEntryId,
-            Buffer.from(imageBuffer),
-            contentType
+            Buffer.from(downloaded.base64Data, 'base64'),
+            downloaded.contentType
         );
 
         return {

@@ -783,6 +783,28 @@ server.tool(
     }
 );
 
+// Tool: download_receipt
+server.tool(
+    "download_receipt",
+    "Download a receipt image from an expense with OAuth authentication. Returns base64-encoded image data that can be used with upload_receipt.",
+    {
+        entryId: z.string().describe("The ID of the expense entry"),
+    },
+    async ({ entryId }) => {
+        try {
+            const result = await concurService.downloadReceipt(entryId);
+            return {
+                content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+            };
+        } catch (error) {
+            return {
+                content: [{ type: "text", text: formatError(error) }],
+                isError: true,
+            };
+        }
+    }
+);
+
 // Tool: copy_receipt
 server.tool(
     "copy_receipt",
@@ -863,6 +885,7 @@ This server provides tools to interact with the SAP Concur API.
 ### Receipts
 - **get_receipt_image_url**: Get receipt image URL for an expense.
 - **list_report_receipts**: List all receipts on a report.
+- **download_receipt**: Download receipt image as base64 (with OAuth auth).
 - **upload_receipt**: Upload a receipt image to an expense.
 - **copy_receipt**: Copy a receipt from one expense to another (for migrations).
 
